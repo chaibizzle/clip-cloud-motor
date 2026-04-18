@@ -22,18 +22,23 @@ app.get('/download', (req, res) => {
     const duration = parseFloat(end) - parseFloat(start);
     const fileName = `clip_${videoId}_${Date.now()}.mp4`;
     const outputPath = path.join(tempDir, fileName);
+    const cookiePath = path.join(__dirname, 'youtube.com_cookies.txt');
 
-    console.log(`[LOG] Procesando video con Cookies: ${videoId}`);
+    console.log(`[LOG] Iniciando descarga para: ${videoId}`);
 
-    // CONFIGURACIÓN CON COOKIES:
-    // Le indicamos a yt-dlp que lea el archivo que subiste a GitHub
-    const getUrl = `yt-dlp --cookies youtube.com_cookies.txt --force-ipv4 --no-check-certificate -g -f "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best" "https://www.youtube.com/watch?v=${videoId}"`;
+    // VERIFICACIÓN DE COOKIES
+    if (!fs.existsSync(cookiePath)) {
+        console.error(`[ERROR] No se encuentra el archivo: ${cookiePath}`);
+        return res.status(500).send("Error: El archivo de cookies no existe en el servidor.");
+    }
+
+    // COMANDO CON COOKIES Y AGENTE DE NAVEGADOR REAL
+    const getUrl = `yt-dlp --cookies "${cookiePath}" --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" --force-ipv4 --no-check-certificate -g -f "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best" "https://www.youtube.com/watch?v=${videoId}"`;
 
     exec(getUrl, (err, stdout) => {
         if (err) {
             console.error(`[ERROR yt-dlp]: ${err}`);
-            // Si esto falla, es probable que las cookies hayan expirado o el nombre del archivo sea distinto
-            return res.status(500).send("Error de autenticación con YouTube. Verifica el archivo de cookies.");
+            return res.status(500).send("YouTube rechazó las cookies o la IP. Intentá generar cookies nuevas.");
         }
 
         const urls = stdout.split('\n').filter(l => l.trim() !== "");
@@ -43,10 +48,7 @@ app.get('/download', (req, res) => {
         const ffmpegCmd = `ffmpeg -ss ${start} -t ${duration} -i "${vUrl}" -ss ${start} -t ${duration} -i "${aUrl}" -map 0:v -map 1:a? -c:v libx264 -preset superfast -crf 28 -c:a aac "${outputPath}"`;
 
         exec(ffmpegCmd, (ffErr) => {
-            if (ffErr) {
-                console.error(`[ERROR ffmpeg]: ${ffErr}`);
-                return res.status(500).send("Error en el recorte de video.");
-            }
+            if (ffErr) return res.status(500).send("Error al procesar el video con FFmpeg.");
             
             res.download(outputPath, fileName, () => {
                 if (fs.existsSync(outputPath)) {
@@ -59,4 +61,7 @@ app.get('/download', (req, res) => {
     });
 });
 
-app.listen(PORT, () => console.log(`Motor con Cookies activo en puerto ${PORT}`));
+app.listen(PORT, () => {
+    console.log(`Motor activo en puerto ${PORT}`);
+    console.log(`Buscando cookies en: ${path.join(__dirname, 'youtube.com_cookies.txt')}`);
+});
