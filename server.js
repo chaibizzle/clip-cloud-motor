@@ -1,76 +1,44 @@
-const express = require('express');
-const cors = require('cors');
-const { exec } = require('child_process');
-const path = require('path');
-const fs = require('fs');
-
-const app = express();
-const PORT = process.env.PORT || 10000;
-
-app.use(cors());
-
-const tempDir = path.join(__dirname, 'temp');
-if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir);
+const axios = require('axios'); // Asegurate de tener axios o usa fetch
 
 app.get('/download', async (req, res) => {
     const videoId = req.query.v;
-    const start = req.query.start;
-    const end = req.query.end;
-
-    if (!videoId || !start || !end) return res.status(400).send('Faltan datos');
-
-    const duration = parseFloat(end) - parseFloat(start);
-    const fileName = `clip_${videoId}_${Date.now()}.mp4`;
-    const outputPath = path.join(tempDir, fileName);
-
-    console.log(`[LOG] Solicitando video a Cobalt: ${videoId}`);
+    const youtubeUrl = `https://www.youtube.com/watch?v=${videoId}`;
+    
+    // Usamos la API que "encontramos" de y2down
+    const apiUrl = `https://p.savenow.to/ajax/download.php?copyright=0&format=720&url=${encodeURIComponent(youtubeUrl)}&api=dfcb6d76f2f6a9894gjkege8a4ab232222`;
 
     try {
-        // Usamos fetch (nativo) para no necesitar librerías extra
-        const response = await fetch('https://api.cobalt.tools/api/json', {
-            method: 'POST',
-            headers: { 'Accept': 'application/json', 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                url: `https://www.youtube.com/watch?v=${videoId}`,
-                videoQuality: '720',
-                downloadMode: 'tunnel'
-            })
+        console.log(`[LOG] Pidiendo video a la API externa para: ${videoId}`);
+        
+        const response = await axios.get(apiUrl, {
+            headers: {
+                'accept': '*/*',
+                'referer': 'https://y2down.cc/',
+                'user-agent': 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36'
+            }
         });
 
-        const data = await response.json();
-        
-        if (!data || !data.url) {
-            console.error("[ERROR] Respuesta de Cobalt sin URL:", data);
-            return res.status(500).send("YouTube bloqueó el túnel. Reintentá en 10 segundos.");
+        // La API suele devolver un JSON con el link directo al .mp4
+        const videoDirectUrl = response.data.url || response.data.link; 
+
+        if (!videoDirectUrl) {
+            return res.status(500).send("No se pudo obtener el link directo de la API externa.");
         }
 
-        const directUrl = data.url;
-        console.log(`[LOG] Recortando con FFmpeg...`);
+        // Ahora que tenemos el link directo, FFmpeg lo procesa sin que YouTube bloquee a Render
+        const fileName = `clip_${videoId}.mp4`;
+        const outputPath = path.join(__dirname, 'temp', fileName);
+        
+        // El comando de FFmpeg ahora usa el link directo de la API
+        const ffmpegCmd = `ffmpeg -ss ${req.query.start} -t ${parseFloat(req.query.end) - parseFloat(req.query.start)} -i "${videoDirectUrl}" -c:v libx264 -preset superfast -crf 28 "${outputPath}"`;
 
-        // Recorte directo desde el stream de Cobalt
-        const ffmpegCmd = `ffmpeg -ss ${start} -t ${duration} -i "${directUrl}" -c:v libx264 -preset superfast -crf 28 -c:a aac "${outputPath}"`;
-
-        exec(ffmpegCmd, (ffErr) => {
-            if (ffErr) {
-                console.error(`[ERROR FFmpeg]: ${ffErr}`);
-                return res.status(500).send("Error al procesar el clip.");
-            }
-            
-            res.download(outputPath, fileName, () => {
-                setTimeout(() => {
-                    if (fs.existsSync(outputPath)) {
-                        try { fs.unlinkSync(outputPath); } catch(e) {}
-                    }
-                }, 15000);
-            });
+        exec(ffmpegCmd, (err) => {
+            if (err) return res.status(500).send("Error al procesar el clip.");
+            res.download(outputPath);
         });
 
     } catch (error) {
-        console.error(`[ERROR]:`, error.message);
-        res.status(500).send("Error de conexión con el motor principal.");
+        console.error("Error conectando con la API externa:", error);
+        res.status(500).send("La API externa rechazó la petición.");
     }
-});
-
-app.listen(PORT, () => {
-    console.log(`Motor Clip Cloud Online en puerto ${PORT}`);
 });
