@@ -23,16 +23,17 @@ app.get('/download', (req, res) => {
     const fileName = `clip_${videoId}_${Date.now()}.mp4`;
     const outputPath = path.join(tempDir, fileName);
 
-    console.log(`[LOG] Procesando video: ${videoId}`);
+    console.log(`[LOG] Procesando video con Cookies: ${videoId}`);
 
-    // CONFIGURACIÓN ANTI-BLOQUEO:
-    // Usamos el cliente de 'ios' o 'android' que suelen tener menos restricciones de IP
-    const getUrl = `yt-dlp --force-ipv4 --no-check-certificate --extractor-args "youtube:player_client=ios,android;player_skip=web" -g -f "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best" "https://www.youtube.com/watch?v=${videoId}"`;
+    // CONFIGURACIÓN CON COOKIES:
+    // Le indicamos a yt-dlp que lea el archivo que subiste a GitHub
+    const getUrl = `yt-dlp --cookies youtube.com_cookies.txt --force-ipv4 --no-check-certificate -g -f "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best" "https://www.youtube.com/watch?v=${videoId}"`;
 
     exec(getUrl, (err, stdout) => {
         if (err) {
             console.error(`[ERROR yt-dlp]: ${err}`);
-            return res.status(500).send("YouTube bloqueó la IP de Render temporalmente. Reintenta en unos segundos.");
+            // Si esto falla, es probable que las cookies hayan expirado o el nombre del archivo sea distinto
+            return res.status(500).send("Error de autenticación con YouTube. Verifica el archivo de cookies.");
         }
 
         const urls = stdout.split('\n').filter(l => l.trim() !== "");
@@ -42,7 +43,10 @@ app.get('/download', (req, res) => {
         const ffmpegCmd = `ffmpeg -ss ${start} -t ${duration} -i "${vUrl}" -ss ${start} -t ${duration} -i "${aUrl}" -map 0:v -map 1:a? -c:v libx264 -preset superfast -crf 28 -c:a aac "${outputPath}"`;
 
         exec(ffmpegCmd, (ffErr) => {
-            if (ffErr) return res.status(500).send("Error en el recorte de video.");
+            if (ffErr) {
+                console.error(`[ERROR ffmpeg]: ${ffErr}`);
+                return res.status(500).send("Error en el recorte de video.");
+            }
             
             res.download(outputPath, fileName, () => {
                 if (fs.existsSync(outputPath)) {
@@ -55,4 +59,4 @@ app.get('/download', (req, res) => {
     });
 });
 
-app.listen(PORT, () => console.log(`Motor activo en puerto ${PORT}`));
+app.listen(PORT, () => console.log(`Motor con Cookies activo en puerto ${PORT}`));
