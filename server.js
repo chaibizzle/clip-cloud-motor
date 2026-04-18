@@ -3,7 +3,6 @@ const cors = require('cors');
 const { exec } = require('child_process');
 const path = require('path');
 const fs = require('fs');
-const axios = require('axios'); // Asegurate de tener axios instalado: npm install axios
 
 const app = express();
 const PORT = process.env.PORT || 10000;
@@ -24,32 +23,37 @@ app.get('/download', async (req, res) => {
     const fileName = `clip_${videoId}_${Date.now()}.mp4`;
     const outputPath = path.join(tempDir, fileName);
 
-    console.log(`[LOG] Solicitando link premium para: ${videoId}`);
+    console.log(`[LOG] Solicitando video a Cobalt: ${videoId}`);
 
     try {
-        // Usamos la API de Cobalt para obtener el stream directo sin bloqueos de IP
-        const response = await axios.post('https://api.cobalt.tools/api/json', {
-            url: `https://www.youtube.com/watch?v=${videoId}`,
-            videoQuality: '720', // Calidad balanceada para que el recorte sea rápido
-            downloadMode: 'tunnel' 
-        }, {
-            headers: { 'Accept': 'application/json', 'Content-Type': 'application/json' }
+        // Usamos fetch (nativo) para no necesitar librerías extra
+        const response = await fetch('https://api.cobalt.tools/api/json', {
+            method: 'POST',
+            headers: { 'Accept': 'application/json', 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                url: `https://www.youtube.com/watch?v=${videoId}`,
+                videoQuality: '720',
+                downloadMode: 'tunnel'
+            })
         });
 
-        if (!response.data || !response.data.url) {
-            throw new Error("No se obtuvo URL de Cobalt");
+        const data = await response.json();
+        
+        if (!data || !data.url) {
+            console.error("[ERROR] Respuesta de Cobalt sin URL:", data);
+            return res.status(500).send("YouTube bloqueó el túnel. Reintentá en 10 segundos.");
         }
 
-        const directUrl = response.data.url;
-        console.log(`[LOG] Stream obtenido. Empezando recorte con FFmpeg...`);
+        const directUrl = data.url;
+        console.log(`[LOG] Recortando con FFmpeg...`);
 
-        // Al tener el stream directo de Cobalt, FFmpeg puede recortar sin que YouTube se entere
+        // Recorte directo desde el stream de Cobalt
         const ffmpegCmd = `ffmpeg -ss ${start} -t ${duration} -i "${directUrl}" -c:v libx264 -preset superfast -crf 28 -c:a aac "${outputPath}"`;
 
         exec(ffmpegCmd, (ffErr) => {
             if (ffErr) {
                 console.error(`[ERROR FFmpeg]: ${ffErr}`);
-                return res.status(500).send("Error al procesar el recorte.");
+                return res.status(500).send("Error al procesar el clip.");
             }
             
             res.download(outputPath, fileName, () => {
@@ -62,11 +66,11 @@ app.get('/download', async (req, res) => {
         });
 
     } catch (error) {
-        console.error(`[ERROR API]:`, error.message);
-        res.status(500).send("El motor de descarga está bajo mantenimiento. Intentá en un momento.");
+        console.error(`[ERROR]:`, error.message);
+        res.status(500).send("Error de conexión con el motor principal.");
     }
 });
 
 app.listen(PORT, () => {
-    console.log(`Motor Clip Cloud (Cobalt Engine) activo en puerto ${PORT}`);
+    console.log(`Motor Clip Cloud Online en puerto ${PORT}`);
 });
