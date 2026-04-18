@@ -3,6 +3,7 @@ const cors = require('cors');
 const { exec } = require('child_process');
 const path = require('path');
 const fs = require('fs');
+const axios = require('axios'); // Asegurate de tener axios instalado: npm install axios
 
 const app = express();
 const PORT = process.env.PORT || 10000;
@@ -12,15 +13,7 @@ app.use(cors());
 const tempDir = path.join(__dirname, 'temp');
 if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir);
 
-// Lista de instancias espejo confiables
-const instances = [
-    "https://inv.tux.pizza",
-    "https://invidious.nerdvpn.de",
-    "https://yewtu.be",
-    "https://invidious.flokinet.to"
-];
-
-app.get('/download', (req, res) => {
+app.get('/download', async (req, res) => {
     const videoId = req.query.v;
     const start = req.query.start;
     const end = req.query.end;
@@ -31,33 +24,32 @@ app.get('/download', (req, res) => {
     const fileName = `clip_${videoId}_${Date.now()}.mp4`;
     const outputPath = path.join(tempDir, fileName);
 
-    // Elegimos una instancia aleatoria para no saturar
-    const randomInstance = instances[Math.floor(Math.random() * instances.length)];
-    
-    console.log(`[LOG] Usando puente: ${randomInstance} para video: ${videoId}`);
+    console.log(`[LOG] Solicitando link premium para: ${videoId}`);
 
-    // Comando optimizado: sin cookies, sin proxy lento, usando el puente espejo
-    const getUrl = `yt-dlp --no-check-certificate -g -f "best" "${randomInstance}/watch?v=${videoId}"`;
+    try {
+        // Usamos la API de Cobalt para obtener el stream directo sin bloqueos de IP
+        const response = await axios.post('https://api.cobalt.tools/api/json', {
+            url: `https://www.youtube.com/watch?v=${videoId}`,
+            videoQuality: '720', // Calidad balanceada para que el recorte sea rápido
+            downloadMode: 'tunnel' 
+        }, {
+            headers: { 'Accept': 'application/json', 'Content-Type': 'application/json' }
+        });
 
-    exec(getUrl, (err, stdout) => {
-        if (err) {
-            console.error(`[ERROR yt-dlp]: ${err}`);
-            return res.status(500).send("El servidor puente está saturado. Reintentá en unos segundos.");
+        if (!response.data || !response.data.url) {
+            throw new Error("No se obtuvo URL de Cobalt");
         }
 
-        const urls = stdout.split('\n').filter(l => l.trim() !== "");
-        if (urls.length === 0) return res.status(500).send("No se pudo obtener la ruta del video.");
+        const directUrl = response.data.url;
+        console.log(`[LOG] Stream obtenido. Empezando recorte con FFmpeg...`);
 
-        const vUrl = urls[0].trim();
-        const aUrl = urls[1] ? urls[1].trim() : vUrl;
-
-        // FFmpeg procesa el recorte
-        const ffmpegCmd = `ffmpeg -ss ${start} -t ${duration} -i "${vUrl}" -ss ${start} -t ${duration} -i "${aUrl}" -map 0:v -map 1:a? -c:v libx264 -preset superfast -crf 28 -c:a aac "${outputPath}"`;
+        // Al tener el stream directo de Cobalt, FFmpeg puede recortar sin que YouTube se entere
+        const ffmpegCmd = `ffmpeg -ss ${start} -t ${duration} -i "${directUrl}" -c:v libx264 -preset superfast -crf 28 -c:a aac "${outputPath}"`;
 
         exec(ffmpegCmd, (ffErr) => {
             if (ffErr) {
                 console.error(`[ERROR FFmpeg]: ${ffErr}`);
-                return res.status(500).send("Error al procesar el clip con FFmpeg.");
+                return res.status(500).send("Error al procesar el recorte.");
             }
             
             res.download(outputPath, fileName, () => {
@@ -68,10 +60,13 @@ app.get('/download', (req, res) => {
                 }, 15000);
             });
         });
-    });
+
+    } catch (error) {
+        console.error(`[ERROR API]:`, error.message);
+        res.status(500).send("El motor de descarga está bajo mantenimiento. Intentá en un momento.");
+    }
 });
 
 app.listen(PORT, () => {
-    console.log(`Motor de Clips activo en puerto ${PORT}`);
-    console.log(`Modo: Puente Espejo (Invidious Network)`);
+    console.log(`Motor Clip Cloud (Cobalt Engine) activo en puerto ${PORT}`);
 });
