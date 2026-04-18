@@ -33,8 +33,7 @@ app.get('/download', (req, res) => {
     }
 
     // COMANDO CON COOKIES Y AGENTE DE NAVEGADOR REAL
-    const getUrl = `yt-dlp --cookies "${cookiePath}" --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" --force-ipv4 --no-check-certificate -g -f "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best" "https://www.youtube.com/watch?v=${videoId}"`;
-
+    const getUrl = `yt-dlp --cookies "${cookiePath}" --user-agent "com.google.android.youtube/19.05.36 (Linux; U; Android 14; es_US; Pixel 8 Pro) gzip" --force-ipv4 --no-check-certificate --extractor-args "youtube:player_client=android" -g -f "best" "https://www.youtube.com/watch?v=${videoId}"`;
     exec(getUrl, (err, stdout) => {
         if (err) {
             console.error(`[ERROR yt-dlp]: ${err}`);
